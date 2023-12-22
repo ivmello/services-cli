@@ -18,12 +18,13 @@ type Services struct {
 }
 
 type Service struct {
-	Name string `yaml:"name"`
-	Path  string `yaml:"path"`
+	Name     string   `yaml:"name"`
+	Path     string   `yaml:"path"`
 	Command  []string `yaml:"command"`
+	Stdout   io.Writer
 }
 
-func (s *Services) getConf(){
+func (s *Services) getConf() {
 	yamlFile, err := os.ReadFile("./services.yaml")
 	if err != nil {
 		log.Printf("yamlFile.Get err   #%v ", err)
@@ -34,19 +35,16 @@ func (s *Services) getConf(){
 	}
 }
 
-func execCommand(dir string, command string, args ...string) (io.ReadCloser, error) {
+func execCommand(dir string, command string, args ...string) (*exec.Cmd, error) {
 	cmd := exec.Command(command, args...)
 	cmd.Dir = dir
-	stdout, err := cmd.StdoutPipe()
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err := cmd.Start()
 	if err != nil {
-		fmt.Println(err)
 		return nil, err
 	}
-	if err := cmd.Start(); err != nil {
-		fmt.Println(err)
-		return nil, err
-	}
-	return stdout, nil
+	return cmd, nil
 }
 
 var rootCmd = &cobra.Command{
@@ -59,18 +57,19 @@ var rootCmd = &cobra.Command{
 		services.getConf()
 		if len(flags) > 0 {
 			var wg sync.WaitGroup
-			wg.Add(len(flags))
+			for range flags {
+				for range services.Services {
+					wg.Add(1)
+				}
+			}
 			for _, flag := range flags {
 				for _, service := range services.Services {
 					if service.Name == flag {
 						go func(service Service) {
 							defer wg.Done()
-							stdout, _ := execCommand(service.Path, service.Command[0], service.Command[1:]...)
 							fmt.Printf("Starting %s\n", service.Name)
-							if _, err := io.Copy(os.Stdout, stdout); err != nil {
-								fmt.Println(err)
-								return
-							}
+							cmd, _ := execCommand(service.Path, service.Command[0], service.Command[1:]...)
+							cmd.Wait()
 						}(service)
 					}
 				}
